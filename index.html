@@ -53,6 +53,19 @@ const DEATH_THRESHOLD=10;       // below this, all die
 const C={bg:"#12100e",card:"rgba(255,255,255,0.04)",gold:"#d4a44a",txt:"#e8dcc8",dim:"rgba(255,255,255,0.35)",win:"#22c55e",lose:"#ef4444"};
 const PLAYER_COLORS=['#4a9eff','#ff4a6a','#4aff7a','#ff9f4a','#c74aff','#4affea','#ff4aff','#ffea4a','#ff6b35','#00d4aa'];
 const NPC_COLOR='#6b7280';
+const BOT_NAMES={
+  santiago:'General Valdés',providencia:'Coronel Baquedano',lasCondes:'Duque Apoquindo',
+  nunoa:'Capitán Irarrázaval',vitacura:'Marqués del Mapocho',laReina:'Barón Ossa',
+  penalolen:'Comandante Tobalaba',macul:'Sargento Grecia',sanJoaquin:'Teniente Vicuña',
+  laFlorida:'Mariscal Walker',puenteAlto:'General Eyzaguirre',laGranja:'Capitán Yungay',
+  sanRamon:'Coronel Batuco',sanMiguel:'Duque del Sur',pedroAC:'Barón Chena',
+  loEspejo:'Teniente Prado',cerrillos:'Sargento Lonquén',maipu:'Mariscal del Viento',
+  estCentral:'Comandante Alameda',qtaNormal:'General Carrascal',recoleta:'Coronel Zapata',
+  independencia:'Duque Santos',conchali:'Capitán Zapadores',huechuraba:'Barón del Norte',
+  renca:'Teniente Cerro',pudahuel:'Sargento Estrella',loPrado:'Comandante Prado',
+  cerroNavia:'Mariscal Navia',sanBernardo:'General O\'Higgins',laCisterna:'Coronel Cisterna'
+};
+function getBotName(comunaId){return BOT_NAMES[comunaId]||'Bot';}
 
 const RANKS=[
   {min:0,name:"Recluta",icon:"🪖"},{min:50,name:"Cabo",icon:"🎖️"},
@@ -221,7 +234,8 @@ function simulateBotTurn(terr){
     const adj=getAdj(aId);
     const enemies=adj.filter(id=>next[id]&&id!==aId);
     if(enemies.length===0)continue;
-    const tId=enemies[Math.floor(Math.random()*enemies.length)];
+    const ranked=enemies.map(id=>({id,g:next[id].garrison})).sort((a,b)=>a.g-b.g);
+    const tId=ranked[0].id;
     const defender=next[tId];
     const r=combat(attacker.garrison,defender.garrison);
     next[aId].garrison=r.newAttacker;
@@ -304,7 +318,7 @@ function HexMap({territories,myId,allPlayers,selected,onSelect}){
             />
             <text x={c.x} y={c.y-5} textAnchor="middle" fill={isMine?C.gold:'#fff'} fontSize={c.r>30?8:7} fontFamily="'Cinzel',serif" fontWeight={700}>{c.name}</text>
             <text x={c.x} y={c.y+9} textAnchor="middle" fill={isMine?C.gold:'rgba(255,255,255,0.7)'} fontSize={9} fontFamily="'Crimson Text',serif">
-              {t?`⚔${t.garrison}`:'?'}
+              {t?`⚔${t.garrison}${t.owner==='npc'?' 🤖':''}`:'?'}
             </text>
           </g>
         );
@@ -901,7 +915,7 @@ function App({user,dbPlayer,onLogout}){
               <div>
                 <div style={{fontFamily:"'Cinzel',serif",fontWeight:700,color:isMine?C.gold:'#fff',fontSize:15}}>{selCom.name}</div>
                 <div style={{fontSize:12,color:C.dim}}>
-                  {sel.owner==='npc'?'🤖 Bot':isMine?'🏰 Tu comuna':`👤 ${getPlayerName(sel.owner)}`}
+                  {sel.owner==='npc'?`🤖 ${getBotName(selectedComuna)}`:isMine?'🏰 Tu comuna':`👤 ${getPlayerName(sel.owner)}`}
                 </div>
               </div>
               <div style={{fontSize:22,fontWeight:700,color:isMine?C.gold:getPlayerColor(sel.owner)}}>⚔{sel.garrison}</div>
