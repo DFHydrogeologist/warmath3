@@ -291,10 +291,11 @@ function unitCombat(attUnits,defUnits,attackType){
     UNIT_KEYS.forEach(t=>{dLosses[t]=defUnits[t]||0;newDef[t]=0;});
   }
 
-  const conquered=attackerWins&&totalUnits(newDef)===0&&attackType==='assault';
+  const actualWin=attackerWins||(totalUnits(newDef)===0&&totalUnits(newAtt)>0);
+  const conquered=actualWin&&totalUnits(newDef)===0&&attackType==='assault';
 
   return{
-    attackerWins,conquered,
+    attackerWins:actualWin,conquered,
     newAtt,newDef,aLosses,dLosses,
     attackerLoss:totalUnits(aLosses),defenderLoss:totalUnits(dLosses)
   };
