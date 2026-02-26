@@ -585,7 +585,7 @@ function HexMap({territories,myId,allPlayers,selected,onSelect,botOwners}){
           <g key={c.id} onClick={()=>onSelect(c.id)} style={{cursor:'pointer'}}>
             <polygon
               points={hexPoints(c.x,c.y,c.r)}
-              fill={color+(isMine?'33':isBot?'30':'22')}
+              fill={color+(isMine?'66':isBot?'55':'22')}
               stroke={isSel?'#fff':isAdj?'#ef4444':isR2?'#ff8c00':color}
               strokeWidth={isSel?2.5:isAdj?1.5:isR2?1.5:(isBot&&empireSize>1?1.5:1)}
               strokeDasharray={isR2&&!isAdj?'4,3':'none'}
@@ -598,6 +598,11 @@ function HexMap({territories,myId,allPlayers,selected,onSelect,botOwners}){
             {hasSpecial&&(
               <text x={c.x} y={c.y+13} textAnchor="middle" fill={isMine?C.gold:'rgba(255,255,255,0.5)'} fontSize={7}>
                 {(tu.flamethrowers||0)>0?`🔥${tu.flamethrowers} `:''}{(tu.towers||0)>0?`🏰${tu.towers} `:''}{(tu.tanks||0)>0?`💣${tu.tanks}`:''}
+              </text>
+            )}
+            {isBot&&empireSize>1&&(
+              <text x={c.x+c.r-4} y={c.y-c.r+10} textAnchor="middle" fill={color} fontSize={7} fontFamily="'Cinzel',serif" fontWeight={700}>
+                👑{empireSize}
               </text>
             )}
           </g>
