@@ -1003,6 +1003,19 @@ function App({user,dbPlayer,onLogout}){
         setBattleLog(l=>[{text:`${label} en ${cName}. Perdiste: ${r.attackerLoss}`,type:"lose"},...l.slice(0,29)]);
       }
       setBattleState(prev=>({...prev,phase:'result',lines:pickNarr(r.attackerWins,ratio,isBombard)}));
+
+      // Bots react to your attack
+      setTimeout(async()=>{
+        const curT=terrRef.current;
+        const curBO=botOwnersRef.current;
+        const br=simulateBotTurn(curT,curBO);
+        setTerritories(br.terr);setBotOwners(br.botOwners);
+        await syncWorldState(br.terr);await saveBotOwners(br.botOwners);
+        await sb.from('game_meta').update({value:new Date().toISOString()}).eq('key','last_bot_turn');
+        const pEvts=br.events.filter(e=>e.startsWith("⚠️")||e.startsWith("🛡️"));
+        if(pEvts.length>0)setBattleLog(l=>[{text:pEvts[0],type:"lose"},...l.slice(0,29)]);
+      },1500);
+
     },lines.length*1800+500));
   },[myId,wins,losses]);
 
