@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+<title>War Math</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Crimson+Text:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;min-height:100vh;overflow-x:hidden;background:#12100e}
+button{border:none;cursor:pointer;outline:none;transition:transform .1s,filter .1s}
+button:active{transform:scale(.96);filter:brightness(.85)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+@keyframes glow{0%,100%{filter:drop-shadow(0 0 4px rgba(212,164,74,.3))}50%{filter:drop-shadow(0 0 12px rgba(212,164,74,.6))}}
+.fade-in{animation:fadeIn .4s ease-out}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#d4a44a33;border-radius:2px}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useEffect,useCallback,useRef,useMemo}=React;
+
+/* ═══════════════════════════════════════════════════
+   ZONE 1: CONFIG — Supabase + Google
+   ═══════════════════════════════════════════════════ */
+const SUPABASE_URL = "https://lmgjpletsgavcpinyqgu.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtZ2pwbGV0c2dhdmNwaW55cWd1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwMTM2NjUsImV4cCI6MjA4NzU4OTY2NX0.d93hW6lNOTLoxi2gkUbM1OXGrgehvKUKi_iy5vypDvo";
+const GOOGLE_CLIENT_ID = "1083936129956-fva782ha5uvplrl8n50t7olblhb0t5e2.apps.googleusercontent.com";
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+
+/* ═══════════════════════════════════════════════════
+   ZONE 2: GAME CONSTANTS
+   ═══════════════════════════════════════════════════ */
+const PASSIVE_MS=1*60*1000;
+const VIDEO_BONUS=15;
+const VIDEO_COOLDOWN_MS=15*60*1000;
+const AUTO_TURN_MS=5*60*1000;
+const TURN_MS=5*60*1000;
+const MAX_CATCHUP=240;
+const SAVE_INTERVAL=5000;
+const STARTING_SOLDIERS=100;
+const BOT_SOLDIERS=50;
+const DEATH_THRESHOLD=10;
+
+const C={bg:"#12100e",card:"rgba(255,255,255,0.04)",gold:"#d4a44a",txt:"#e8dcc8",dim:"rgba(255,255,255,0.35)",win:"#22c55e",lose:"#ef4444"};
+const PLAYER_COLORS=['#4a9eff','#ff4a6a','#4aff7a','#ff9f4a','#c74aff','#4affea','#ff4aff','#ffea4a','#ff6b35','#00d4aa'];
+const NPC_COLOR='#6b7280';
+
+/* ═══════════════════════════════════════════════════
+   ZONE 2B: BOT IDENTITY & PERSONALITY SYSTEM
+   ═══════════════════════════════════════════════════ */
+const BOT_NAMES={
+  santiago:'General Valdés',providencia:'Coronel Baquedano',lasCondes:'Duque Apoquindo',
+  nunoa:'Capitán Irarrázaval',vitacura:'Marqués del Mapocho',laReina:'Barón Ossa',
+  penalolen:'Comandante Tobalaba',macul:'Sargento Grecia',sanJoaquin:'Teniente Vicuña',
+  laFlorida:'Mariscal Walker',puenteAlto:'General Eyzaguirre',laGranja:'Capitán Yungay',
+  sanRamon:'Coronel Batuco',sanMiguel:'Duque del Sur',pedroAC:'Barón Chena',
+  loEspejo:'Teniente Prado',cerrillos:'Sargento Lonquén',maipu:'Mariscal del Viento',
+  estCentral:'Comandante Alameda',qtaNormal:'General Carrascal',recoleta:'Coronel Zapata',
+  independencia:'Duque Santos',conchali:'Capitán Zapadores',huechuraba:'Barón del Norte',
+  renca:'Teniente Cerro',pudahuel:'Sargento Estrella',loPrado:'Comandante Prado',
+  cerroNavia:'Mariscal Navia',sanBernardo:"General O'Higgins",laCisterna:'Coronel Cisterna'
+};
+
+// Deterministic hash for personality assignment
+function simpleHash(str){let h=0;for(let i=0;i<str.length;i++)h=((h<<5)-h+str.charCodeAt(i))|0;return Math.abs(h);}
+
+// Personality types: hunter_weak (10%), hunter_strong (10%), random (80%)
+const PERSONALITY_LABELS={hunter_weak:{name:'Cazador',icon:'🎯',desc:'Ataca al más débil'},hunter_strong:{name:'Berserker',icon:'💪',desc:'Ataca al más fuerte'},random:{name:'Impredecible',icon:'🎲',desc:'Ataca al azar'}};
+
+// Assign personalities deterministically
+const BOT_PERSONALITY_MAP=(()=>{
+  const sorted=Object.keys(BOT_NAMES).map(id=>({id,h:simpleHash(id)})).sort((a,b)=>a.h-b.h);
+  const total=sorted.length; // 30
+  const nWeak=Math.max(1,Math.round(total*0.1));   // 3
+  const nStrong=Math.max(1,Math.round(total*0.1));  // 3
+  const map={};
+  sorted.forEach((b,i)=>{
+    if(i<nWeak) map[b.id]='hunter_weak';
+    else if(i<nWeak+nStrong) map[b.id]='hunter_strong';
+    else map[b.id]='random';
+  });
+  return map;
+})();
+
+function getBotId(comunaId){return `bot_${comunaId}`;}
+function getBotHomeComunaId(botId){return botId.replace('bot_','');}
+function getBotName(comunaIdOrBotId){
+  const cId=comunaIdOrBotId.startsWith('bot_')?comunaIdOrBotId.replace('bot_',''):comunaIdOrBotId;
+  return BOT_NAMES[cId]||'Bot';
+}
+function getBotPersonality(comunaIdOrBotId){
+  const cId=comunaIdOrBotId.startsWith('bot_')?comunaIdOrBotId.replace('bot_',''):comunaIdOrBotId;
+  return BOT_PERSONALITY_MAP[cId]||'random';
+}
+function getPersonalityInfo(comunaIdOrBotId){
+  const p=getBotPersonality(comunaIdOrBotId);
+  return PERSONALITY_LABELS[p]||PERSONALITY_LABELS.random;
+}
+
+// Bot empire colors — golden angle for max distribution
+const BOT_EMPIRE_COLORS=(()=>{
+  const colors={};
+  const keys=Object.keys(BOT_NAMES);
+  keys.forEach((id,i)=>{
+    const hue=(i*137.508)%360;
+    colors[`bot_${id}`]=`hsl(${Math.round(hue)},45%,42%)`;
+  });
+  return colors;
+})();
+function getBotColor(botId){return BOT_EMPIRE_COLORS[botId]||NPC_COLOR;}
+
+const RANKS=[
+  {min:0,name:"Recluta",icon:"🪖"},{min:50,name:"Cabo",icon:"🎖️"},
+  {min:150,name:"Sargento",icon:"⚔️"},{min:300,name:"Teniente",icon:"🛡️"},
+  {min:500,name:"Capitán",icon:"🏰"},{min:800,name:"Coronel",icon:"👑"},
+  {min:1200,name:"General",icon:"🦅"},{min:2000,name:"Mariscal",icon:"⭐"},
+  {min:5000,name:"Emperador",icon:"👸"}
+];
+function getRank(s){let r=RANKS[0];RANKS.forEach(rk=>{if(s>=rk.min)r=rk;});return r;}
+
+/* ═══════════════════════════════════════════════════
+   ZONE 3: COMUNAS DATA — hex positions + adjacency
+   ═══════════════════════════════════════════════════ */
+const COMUNAS=[
+  {id:'huechuraba',name:'Huechuraba',x:280,y:40,r:28,zone:'norte'},
+  {id:'renca',name:'Renca',x:195,y:55,r:27,zone:'norte'},
+  {id:'conchali',name:'Conchalí',x:320,y:100,r:24,zone:'norte'},
+  {id:'vitacura',name:'Vitacura',x:440,y:65,r:30,zone:'oriente'},
+  {id:'recoleta',name:'Recoleta',x:365,y:110,r:25,zone:'norte'},
+  {id:'independencia',name:'Independ.',x:255,y:115,r:22,zone:'centro'},
+  {id:'qtaNormal',name:'Qta.Normal',x:175,y:160,r:24,zone:'centro'},
+  {id:'cerroNavia',name:'C.Navia',x:95,y:160,r:24,zone:'poniente'},
+  {id:'pudahuel',name:'Pudahuel',x:35,y:210,r:35,zone:'poniente'},
+  {id:'santiago',name:'Santiago',x:280,y:185,r:33,zone:'centro'},
+  {id:'providencia',name:'Providencia',x:390,y:175,r:28,zone:'oriente'},
+  {id:'lasCondes',name:'Las Condes',x:495,y:135,r:35,zone:'oriente'},
+  {id:'estCentral',name:'Est.Central',x:195,y:225,r:24,zone:'centro'},
+  {id:'loPrado',name:'Lo Prado',x:115,y:230,r:22,zone:'poniente'},
+  {id:'laReina',name:'La Reina',x:490,y:210,r:27,zone:'oriente'},
+  {id:'nunoa',name:'Ñuñoa',x:400,y:245,r:28,zone:'oriente'},
+  {id:'macul',name:'Macul',x:465,y:295,r:24,zone:'oriente'},
+  {id:'penalolen',name:'Peñalolén',x:540,y:260,r:30,zone:'oriente'},
+  {id:'sanMiguel',name:'S.Miguel',x:290,y:265,r:24,zone:'sur'},
+  {id:'cerrillos',name:'Cerrillos',x:145,y:295,r:25,zone:'poniente'},
+  {id:'maipu',name:'Maipú',x:55,y:300,r:38,zone:'poniente'},
+  {id:'pedroAC',name:'P.A.Cerda',x:225,y:305,r:22,zone:'sur'},
+  {id:'sanJoaquin',name:'S.Joaquín',x:355,y:320,r:24,zone:'sur'},
+  {id:'laCisterna',name:'La Cisterna',x:280,y:355,r:24,zone:'sur'},
+  {id:'loEspejo',name:'Lo Espejo',x:190,y:370,r:23,zone:'sur'},
+  {id:'sanRamon',name:'San Ramón',x:275,y:420,r:23,zone:'sur'},
+  {id:'laGranja',name:'La Granja',x:350,y:395,r:23,zone:'sur'},
+  {id:'laFlorida',name:'La Florida',x:440,y:375,r:35,zone:'sur'},
+  {id:'sanBernardo',name:'S.Bernardo',x:170,y:450,r:35,zone:'sur'},
+  {id:'puenteAlto',name:'Puente Alto',x:450,y:465,r:38,zone:'sur'},
+];
+
+const ADJ_FACTOR=2.1;
+COMUNAS.forEach(c=>{
+  c.adj=COMUNAS.filter(o=>o.id!==c.id&&Math.hypot(c.x-o.x,c.y-o.y)<(c.r+o.r)*ADJ_FACTOR).map(o=>o.id);
+});
+
+function getAdj(id){return COMUNAS.find(c=>c.id===id)?.adj||[];}
+function getCom(id){return COMUNAS.find(c=>c.id===id);}
+
+const ZONE_COLORS={norte:'#64748b',centro:'#8b5cf6',oriente:'#3b82f6',poniente:'#f59e0b',sur:'#10b981'};
+
+/* ═══════════════════════════════════════════════════
+   ZONE 4: COMBAT SYSTEM
+   ═══════════════════════════════════════════════════ */
+function combat(attackers,defenders){
+  const total=attackers+defenders;
+  const baseChance=attackers/total;
+  const luck=(Math.random()-0.5)*0.3;
+  const winChance=Math.max(0.05,Math.min(0.95,baseChance+luck));
+  const attackerWins=Math.random()<winChance;
+
+  let aLoss,dLoss;
+  if(attackerWins){
+    aLoss=Math.ceil(defenders*(0.05+Math.random()*0.10));
+    dLoss=Math.ceil(defenders*(0.20+Math.random()*0.20));
+  }else{
+    dLoss=Math.ceil(attackers*(0.05+Math.random()*0.10));
+    aLoss=Math.ceil(attackers*(0.20+Math.random()*0.20));
+  }
+
+  let newA=Math.max(0,attackers-aLoss);
+  let newD=Math.max(0,defenders-dLoss);
+  if(newA>0&&newA<DEATH_THRESHOLD){aLoss=attackers;newA=0;}
+  if(newD>0&&newD<DEATH_THRESHOLD){dLoss=defenders;newD=0;}
+
+  return{
+    attackerWins,
+    newAttacker:newA,newDefender:newD,
+    attackerLoss:attackers-newA,defenderLoss:defenders-newD,
+    conquered:attackerWins&&newD===0
+  };
+}
+
+/* ═══════════════════════════════════════════════════
+   ZONE 5: BATTLE NARRATIVES
+   ═══════════════════════════════════════════════════ */
+const NARR_WIN=[
+  ["⚔️ Tus tropas avanzan con furia...","🔥 El choque es brutal, pero tu superioridad es clara.","🏆 ¡Victoria! El enemigo retrocede herido."],
+  ["🌅 Al amanecer, suena el cuerno de guerra...","💀 La batalla es sangrienta pero tus hombres resisten.","👑 ¡Triunfo! Tus estandartes ondean victoriosos."],
+  ["🏇 La caballería carga sin piedad...","⚡ El impacto destroza las líneas enemigas.","🎯 ¡Aplastante victoria! Pocos enemigos escapan."],
+  ["🛡️ Tus soldados forman el muro de escudos...","🗡️ Avanzan paso a paso, imparables.","🦅 ¡Gloria! El campo de batalla es tuyo."],
+  ["🏰 Rodeas la posición enemiga...","🔥 Flechas y acero llueven sobre el defensor.","⭐ ¡Conquistador! Tu nombre se recuerda con temor."],
+  ["🐺 Como lobos hambrientos, tus tropas atacan...","💥 El caos favorece a los más feroces.","🏆 ¡Victoria salvaje! El enemigo huye despavorido."],
+];
+const NARR_LOSE=[
+  ["⚔️ Tus tropas avanzan con valor...","💔 Pero la defensa es más fuerte de lo esperado.","😞 Derrota. Tus hombres se retiran con bajas."],
+  ["🌧️ Bajo la lluvia, comienza el asalto...","🛡️ El enemigo resiste con determinación inquebrantable.","💀 Caída. El barro se tiñe con la sangre de los tuyos."],
+  ["🏇 La carga parece imparable...","⚡ Pero una emboscada destroza tu flanco.","😔 Retirada forzosa. Hoy no fue tu día."],
+  ["🗡️ El acero choca con violencia...","🔥 Tus líneas se quiebran bajo la presión.","💔 Derrota amarga. El enemigo mantiene su posición."],
+  ["🐺 Atacas con ferocidad...","🛡️ Pero el enemigo tenía refuerzos ocultos.","😞 Retirada. Perdiste más hombres de los esperados."],
+];
+const NARR_CLOSE_WIN=[
+  ["⚔️ Fuerzas parejas chocan en el campo...","💀 La batalla se extiende por horas, el resultado incierto.","🎲 ¡Por un pelo! La suerte favoreció a los audaces."],
+  ["🌪️ Un combate feroz entre iguales...","🗡️ Ambos bandos sufren enormes pérdidas.","👑 ¡Victoria pírrica! Ganaste, pero a un alto costo."],
+  ["⚡ Ni un centímetro se cede fácilmente...","🔥 El último empuje decide la batalla.","🏆 ¡Milagro! Arrancaste la victoria de las fauces de la derrota."],
+];
+
+function pickNarr(win,ratio){
+  if(!win)return NARR_LOSE[Math.floor(Math.random()*NARR_LOSE.length)];
+  if(ratio<1.3)return NARR_CLOSE_WIN[Math.floor(Math.random()*NARR_CLOSE_WIN.length)];
+  return NARR_WIN[Math.floor(Math.random()*NARR_WIN.length)];
+}
+
+/* ═══════════════════════════════════════════════════
+   ZONE 6: SUPABASE HELPERS
+   ═══════════════════════════════════════════════════ */
+function decodeJwt(token){try{return JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));}catch{return null;}}
+
+async function upsertPlayer(gUser){
+  const{data:existing}=await sb.from('players').select('*').eq('google_sub',gUser.sub).maybeSingle();
+  if(existing){
+    await sb.from('players').update({name:gUser.name||'Jugador',picture:gUser.picture||'',last_seen:new Date().toISOString()}).eq('google_sub',gUser.sub);
+    return existing;
+  }
+  const{data}=await sb.from('players').insert({google_sub:gUser.sub,name:gUser.name||'Jugador',picture:gUser.picture||''}).select().single();
+  return data;
+}
+
+async function fetchWorld(){
+  const[tRes,pRes,mRes,boRes]=await Promise.all([
+    sb.from('territories').select('*'),
+    sb.from('players').select('*'),
+    sb.from('game_meta').select('*').eq('key','last_bot_turn').single(),
+    sb.from('game_meta').select('*').eq('key','bot_owners').maybeSingle()
+  ]);
+  let botOwners=null;
+  if(boRes.data?.value){
+    try{botOwners=JSON.parse(boRes.data.value);}catch{botOwners=null;}
+  }
+  return{territories:tRes.data||[],players:pRes.data||[],lastBotTurn:mRes.data?.value,botOwners};
+}
+
+function buildState(terrRows){
+  const s={};
+  terrRows.forEach(t=>{s[t.comuna_id]={owner:t.owner_type==='npc'?'npc':t.owner_id,garrison:t.garrison};});
+  return s;
+}
+
+// Initialize bot owners: each NPC comuna owned by its original bot
+function initBotOwners(terr){
+  const owners={};
+  Object.entries(terr).forEach(([id,t])=>{
+    if(t.owner==='npc'){
+      owners[id]=getBotId(id); // each comuna starts with its own bot
+    }
+    // Player-owned comunas are NOT in botOwners
+  });
+  return owners;
+}
+
+async function saveBotOwners(owners){
+  const val=JSON.stringify(owners);
+  const{data}=await sb.from('game_meta').select('*').eq('key','bot_owners').maybeSingle();
+  if(data){
+    await sb.from('game_meta').update({value:val}).eq('key','bot_owners');
+  }else{
+    await sb.from('game_meta').insert({key:'bot_owners',value:val});
+  }
+}
+
+/* Bot turn simulation — now with personalities and empires */
+function simulateBotTurn(terr,botOwners){
+  const next={};
+  Object.entries(terr).forEach(([id,t])=>{next[id]={...t};});
+  const nextBO={...botOwners};
+  const events=[];
+
+  // All NPC comunas gain +1 soldier
+  Object.entries(next).forEach(([id,t])=>{if(t.owner==='npc')t.garrison+=1;});
+
+  // Group territories by bot empire
+  const empires={};
+  Object.entries(next).forEach(([id,t])=>{
+    if(t.owner==='npc'){
+      const botId=nextBO[id]||getBotId(id);
+      if(!empires[botId])empires[botId]=[];
+      empires[botId].push(id);
+    }
+  });
+
+  // Pick 2-5 bot empires to act
+  const empireIds=Object.keys(empires);
+  if(empireIds.length===0)return{terr:next,events,botOwners:nextBO};
+  const numAttacks=Math.min(empireIds.length,2+Math.floor(Math.random()*4));
+
+  // Shuffle and pick
+  const shuffled=[...empireIds].sort(()=>Math.random()-0.5);
+  const acting=shuffled.slice(0,numAttacks);
+
+  for(const botId of acting){
+    const myComunas=empires[botId]||[];
+    const personality=getBotPersonality(botId);
+    const botName=getBotName(botId);
+
+    // Gather all attack options across the empire
+    const options=[];
+    myComunas.forEach(cId=>{
+      if(next[cId].garrison<=20)return;
+      getAdj(cId).forEach(tId=>{
+        if(!next[tId])return;
+        // Can attack if target is NOT part of this bot's empire
+        const targetBotId=nextBO[tId];
+        if(next[tId].owner==='npc'&&targetBotId===botId)return; // own territory
+        options.push({from:cId,to:tId,fg:next[cId].garrison,tg:next[tId].garrison});
+      });
+    });
+
+    if(options.length===0)continue;
+
+    // Choose target based on personality
+    let chosen;
+    if(personality==='hunter_weak'){
+      // Attack the weakest reachable target
+      chosen=[...options].sort((a,b)=>a.tg-b.tg)[0];
+    }else if(personality==='hunter_strong'){
+      // Attack the strongest reachable target
+      chosen=[...options].sort((a,b)=>b.tg-a.tg)[0];
+    }else{
+      // Random
+      chosen=options[Math.floor(Math.random()*options.length)];
+    }
+
+    const r=combat(next[chosen.from].garrison,next[chosen.to].garrison);
+    next[chosen.from].garrison=r.newAttacker;
+    next[chosen.to].garrison=r.newDefender;
+    const cName=getCom(chosen.to)?.name||chosen.to;
+    const pInfo=getPersonalityInfo(botId);
+
+    if(r.conquered){
+      // Bot conquers! The conquered comuna joins this bot's empire
+      const oldBotOwner=nextBO[chosen.to];
+      next[chosen.to].owner='npc';
+      nextBO[chosen.to]=botId; // transfer ownership
+      const move=Math.ceil(r.newAttacker*0.25);
+      next[chosen.to].garrison=move;
+      next[chosen.from].garrison-=move;
+
+      // Show vassal message if a different bot was there
+      const vassalName=(oldBotOwner&&oldBotOwner!==botId)?getBotName(oldBotOwner):'';
+      const vassalMsg=vassalName?` (${vassalName} ahora sirve a ${botName})`:'';
+      events.push(`⚠️ ${pInfo.icon} ${botName} conquistó ${cName}!${vassalMsg}`);
+
+      // Update empire mapping for the conquered bot's remaining territories
+      // (they keep their own identity — only the conquered comuna transfers)
+    }else if(r.attackerWins){
+      events.push(`🤖 ${pInfo.icon} ${botName} atacó ${cName} (-${r.defenderLoss})`);
+    }else{
+      events.push(`🛡️ ${cName} resistió a ${pInfo.icon} ${botName}`);
+    }
+  }
+
+  return{terr:next,events,botOwners:nextBO};
+}
+
+async function syncWorldState(terr){
+  const updates=Object.entries(terr).map(([id,t])=>({
+    comuna_id:id,
+    owner_type:t.owner==='npc'?'npc':'player',
+    owner_id:t.owner==='npc'?null:t.owner,
+    garrison:t.garrison
+  }));
+  for(const u of updates){
+    await sb.from('territories').update({owner_type:u.owner_type,owner_id:u.owner_id,garrison:u.garrison}).eq('comuna_id',u.comuna_id);
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   ZONE 7: HEXAGON RENDERER
+   ═══════════════════════════════════════════════════ */
+function hexPoints(cx,cy,r){
+  return Array.from({length:6},(_,i)=>{
+    const a=Math.PI/3*i-Math.PI/6;
+    return`${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`;
+  }).join(' ');
+}
+
+function HexMap({territories,myId,allPlayers,selected,onSelect,botOwners}){
+  const getColor=(t,comunaId)=>{
+    if(!t)return NPC_COLOR;
+    if(t.owner==='npc'){
+      const botId=botOwners[comunaId]||getBotId(comunaId);
+      return getBotColor(botId);
+    }
+    if(t.owner===myId)return C.gold;
+    const idx=allPlayers.findIndex(p=>p.id===t.owner);
+    return PLAYER_COLORS[idx%PLAYER_COLORS.length];
+  };
+  const myAdj=new Set();
+  Object.entries(territories).forEach(([id,t])=>{
+    if(t.owner===myId)getAdj(id).forEach(a=>{if(territories[a]?.owner!==myId)myAdj.add(a);});
+  });
+
+  // Count empire sizes for labels
+  const empireSizes={};
+  Object.entries(botOwners).forEach(([,botId])=>{
+    empireSizes[botId]=(empireSizes[botId]||0)+1;
+  });
+
+  return(
+    <svg viewBox="0 0 580 520" style={{width:'100%',maxWidth:600,margin:'0 auto',display:'block'}}>
+      <defs>
+        <filter id="glow"><feGaussianBlur stdDeviation="2" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      {COMUNAS.map(c=>c.adj.map(aId=>{
+        const o=getCom(aId);if(!o||c.id>aId)return null;
+        // Highlight same-empire connections
+        const t1=territories[c.id],t2=territories[aId];
+        const sameEmpire=t1?.owner==='npc'&&t2?.owner==='npc'&&botOwners[c.id]&&botOwners[c.id]===botOwners[aId];
+        return <line key={`${c.id}-${aId}`} x1={c.x} y1={c.y} x2={o.x} y2={o.y} stroke={sameEmpire?getBotColor(botOwners[c.id])+'55':"rgba(255,255,255,0.06)"} strokeWidth={sameEmpire?2:1}/>;
+      }))}
+      {COMUNAS.map(c=>{
+        const t=territories[c.id];
+        const color=getColor(t,c.id);
+        const isMine=t?.owner===myId;
+        const isAdj=myAdj.has(c.id);
+        const isSel=selected===c.id;
+        const isBot=t?.owner==='npc';
+        const botId=isBot?(botOwners[c.id]||getBotId(c.id)):null;
+        const empireSize=botId?empireSizes[botId]||1:0;
+        return(
+          <g key={c.id} onClick={()=>onSelect(c.id)} style={{cursor:'pointer'}}>
+            <polygon
+              points={hexPoints(c.x,c.y,c.r)}
+              fill={color+(isMine?'33':isBot?'30':'22')}
+              stroke={isSel?'#fff':isAdj?'#ef4444':color}
+              strokeWidth={isSel?2.5:isAdj?1.5:(isBot&&empireSize>1?1.5:1)}
+              filter={isMine?'url(#glow)':'none'}
+            />
+            <text x={c.x} y={c.y-5} textAnchor="middle" fill={isMine?C.gold:'#fff'} fontSize={c.r>30?8:7} fontFamily="'Cinzel',serif" fontWeight={700}>{c.name}</text>
+            <text x={c.x} y={c.y+9} textAnchor="middle" fill={isMine?C.gold:'rgba(255,255,255,0.7)'} fontSize={9} fontFamily="'Crimson Text',serif">
+              {t?`⚔${t.garrison}${isBot?` ${getPersonalityInfo(botId).icon}`:''}`:'?'}
+            </text>
+            {isBot&&empireSize>1&&(
+              <text x={c.x+c.r-4} y={c.y-c.r+10} textAnchor="middle" fill={color} fontSize={7} fontFamily="'Cinzel',serif" fontWeight={700}>
+                👑{empireSize}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/* ═══════════════════════════════════════════════════
+   ZONE 8: AUTH SYSTEM
+   ═══════════════════════════════════════════════════ */
+function AuthApp(){
+  const[user,setUser]=useState(null);
+  const[dbPlayer,setDbPlayer]=useState(null);
+  const[authReady,setAuthReady]=useState(false);
+  const[authError,setAuthError]=useState(null);
+
+  useEffect(()=>{
+    try{const s=localStorage.getItem("wm2_guser");if(s){const u=JSON.parse(s);if(u?.sub)setUser(u);}}catch{}
+    setAuthReady(true);
+  },[]);
+
+  useEffect(()=>{
+    if(!user||user.sub==='guest')return;
+    upsertPlayer(user).then(p=>{if(p)setDbPlayer(p);});
+  },[user]);
+
+  useEffect(()=>{
+    if(typeof google==='undefined'){
+      const iv=setInterval(()=>{if(typeof google!=='undefined'){clearInterval(iv);initGSI();}},200);
+      const t=setTimeout(()=>{clearInterval(iv);setAuthReady(true);},5000);
+      return()=>{clearInterval(iv);clearTimeout(t);};
+    }else initGSI();
+    function initGSI(){
+      try{
+        google.accounts.id.initialize({client_id:GOOGLE_CLIENT_ID,callback:r=>{
+          const p=decodeJwt(r.credential);
+          if(p){const u={sub:p.sub,name:p.name||"Jugador",email:p.email||"",picture:p.picture||""};setUser(u);setAuthError(null);try{localStorage.setItem("wm2_guser",JSON.stringify(u));}catch{}}
+        },auto_select:true});
+        setAuthReady(true);
+      }catch{setAuthError("Error GSI");setAuthReady(true);}
+    }
+  },[]);
+
+  const handleGoogleLogin=useCallback(()=>{
+    if(typeof google!=='undefined')try{google.accounts.id.prompt(n=>{if(n.isNotDisplayed()||n.isSkippedMoment())setAuthError("popup_blocked");});}catch{setAuthError("Error GSI");}
+  },[]);
+  const handleLogout=useCallback(()=>{setUser(null);setDbPlayer(null);try{localStorage.removeItem("wm2_guser");}catch{};if(typeof google!=='undefined')try{google.accounts.id.disableAutoSelect();}catch{}},[]);
+  const handleGuest=useCallback(()=>{const g={sub:"guest",name:"Invitado",email:"",picture:""};setUser(g);try{localStorage.setItem("wm2_guser",JSON.stringify(g));}catch{}},[]);
+
+  if(!authReady)return <LoadingScreen msg="Cargando..."/>;
+  if(!user)return <LoginScreen onGoogle={handleGoogleLogin} onGuest={handleGuest} authError={authError}/>;
+  return <App user={user} dbPlayer={dbPlayer} onLogout={handleLogout}/>;
+}
+
+function LoginScreen({onGoogle,onGuest,authError}){
+  return(
+    <div style={{width:'100%',minHeight:'100vh',background:`radial-gradient(ellipse at 50% 30%,#1a160f,${C.bg})`,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div style={{fontSize:42,marginBottom:8}}>⚔️</div>
+      <h1 style={{fontFamily:"'Cinzel',serif",color:C.gold,fontSize:28,fontWeight:900,marginBottom:4}}>War Math</h1>
+      <p style={{color:C.dim,fontFamily:"'Crimson Text',serif",fontSize:14,marginBottom:30}}>Conquista Santiago</p>
+      <button onClick={onGoogle} style={{background:'#fff',borderRadius:12,padding:'14px 28px',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:14,color:'#333',marginBottom:12,minWidth:220}}>
+        🔐 Entrar con Google
+      </button>
+      <button onClick={onGuest} style={{background:'transparent',border:'1px solid rgba(255,255,255,0.15)',borderRadius:12,padding:'12px 28px',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13,color:C.dim,minWidth:220}}>
+        Entrar como Invitado
+      </button>
+      {authError&&<p style={{color:C.lose,fontSize:12,marginTop:12}}>Error: {authError}</p>}
+    </div>
+  );
+}
+
+function LoadingScreen({msg}){
+  return(
+    <div style={{width:'100%',height:'100vh',background:C.bg,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16}}>
+      <div style={{width:40,height:40,border:'3px solid rgba(255,255,255,0.1)',borderTop:`3px solid ${C.gold}`,borderRadius:'50%',animation:'spin 1s linear infinite'}}/>
+      <div style={{color:C.gold,fontFamily:"'Cinzel',serif",fontSize:15}}>{msg||'Cargando...'}</div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════
+   ZONE 9: MAIN GAME APP
+   ═══════════════════════════════════════════════════ */
+function App({user,dbPlayer,onLogout}){
+  const myId=dbPlayer?.id||null;
+  const isGuest=user.sub==='guest';
+
+  const[loading,setLoading]=useState(true);
+  const[territories,setTerritories]=useState({});
+  const[botOwners,setBotOwners]=useState({}); // {comunaId: botId}
+  const[allPlayers,setAllPlayers]=useState([]);
+  const[wins,setWins]=useState(0);
+  const[losses,setLosses]=useState(0);
+  const[prodRate,setProdRate]=useState(1);
+  const[battleLog,setBattleLog]=useState([{text:"¡Conquista Santiago!",type:"info"}]);
+  const[catchUpData,setCatchUpData]=useState(null);
+  const[screen,setScreen]=useState("init");
+  const[selectedComuna,setSelectedComuna]=useState(null);
+  const[toast,setToast]=useState(null);
+  const[moveState,setMoveState]=useState(null);
+  const[lastVideoTime,setLastVideoTime]=useState(()=>{try{const t=localStorage.getItem("wm2_vid");return t?parseInt(t):0;}catch{return 0;}});
+  const[videoTick,setVideoTick]=useState(0);
+
+  const[battleState,setBattleState]=useState(null);
+  const battleTimers=useRef([]);
+
+  const terrRef=useRef(territories);
+  useEffect(()=>{terrRef.current=territories;},[territories]);
+  const botOwnersRef=useRef(botOwners);
+  useEffect(()=>{botOwnersRef.current=botOwners;},[botOwners]);
+
+  useEffect(()=>{
+    if(dbPlayer){
+      setProdRate(dbPlayer.prod_rate||1);
+      setWins(dbPlayer.wins||0);
+      setLosses(dbPlayer.losses||0);
+    }
+  },[dbPlayer]);
+
+  const myTerrs=useMemo(()=>Object.entries(territories).filter(([,t])=>t.owner===myId),[territories,myId]);
+  const totalSoldiers=useMemo(()=>myTerrs.reduce((s,[,t])=>s+t.garrison,0),[myTerrs]);
+  const rank=getRank(totalSoldiers);
+  const hasStarted=myTerrs.length>0;
+  const videoReady=Date.now()-lastVideoTime>=VIDEO_COOLDOWN_MS;
+  const videoWaitSec=videoReady?0:Math.ceil((VIDEO_COOLDOWN_MS-(Date.now()-lastVideoTime))/1000);
+
+  // Bot empire stats
+  const botEmpireStats=useMemo(()=>{
+    const stats={};
+    Object.entries(botOwners).forEach(([cId,botId])=>{
+      if(!stats[botId])stats[botId]={comunas:[],totalGarrison:0,name:getBotName(botId),personality:getPersonalityInfo(botId)};
+      stats[botId].comunas.push(cId);
+      stats[botId].totalGarrison+=(territories[cId]?.garrison||0);
+    });
+    return stats;
+  },[botOwners,territories]);
+
+  const showToast=(msg,duration=3000)=>{setToast(msg);setTimeout(()=>setToast(null),duration);};
+
+  /* ═══ LOAD WORLD ═══ */
+  useEffect(()=>{
+    if(!myId&&!isGuest)return;
+    let cancelled=false;
+    async function init(){
+      try{
+        const world=await fetchWorld();
+        if(cancelled)return;
+        const state=buildState(world.territories);
+        setTerritories(state);
+        setAllPlayers(world.players);
+
+        // Initialize or load bot owners
+        let bo=world.botOwners;
+        if(!bo||Object.keys(bo).length===0){
+          bo=initBotOwners(state);
+          await saveBotOwners(bo);
+        }else{
+          // Sync: any NPC comuna not in botOwners gets assigned its original bot
+          let needsSave=false;
+          Object.entries(state).forEach(([id,t])=>{
+            if(t.owner==='npc'&&!bo[id]){bo[id]=getBotId(id);needsSave=true;}
+          });
+          // Remove player-owned comunas from botOwners
+          Object.keys(bo).forEach(id=>{
+            if(state[id]&&state[id].owner!=='npc'){delete bo[id];needsSave=true;}
+          });
+          if(needsSave)await saveBotOwners(bo);
+        }
+        setBotOwners(bo);
+
+        // Catch-up
+        if(world.lastBotTurn){
+          const elapsed=Date.now()-new Date(world.lastBotTurn).getTime();
+          const missed=Math.min(MAX_CATCHUP,Math.floor(elapsed/TURN_MS));
+          if(missed>0){
+            const oldVal=world.lastBotTurn;
+            const{data}=await sb.from('game_meta').update({value:new Date().toISOString()}).eq('key','last_bot_turn').eq('value',oldVal).select();
+            if(data?.length>0){
+              let cur=state;let curBO=bo;const evts=[];
+              for(let i=0;i<missed;i++){
+                const r=simulateBotTurn(cur,curBO);
+                cur=r.terr;curBO=r.botOwners;evts.push(...r.events);
+              }
+              if(myId){
+                const player=world.players.find(p=>p.id===myId);
+                const pr=player?.prod_rate||1;
+                const passiveMinutes=Math.floor(elapsed/PASSIVE_MS);
+                Object.entries(cur).forEach(([id,t])=>{
+                  if(t.owner===myId)cur[id].garrison+=passiveMinutes*pr;
+                });
+              }
+              await syncWorldState(cur);
+              await saveBotOwners(curBO);
+              if(!cancelled){setTerritories(cur);setBotOwners(curBO);if(evts.length>0)setCatchUpData({turns:missed,events:evts});}
+            }else{
+              const fresh=await fetchWorld();
+              if(!cancelled){
+                setTerritories(buildState(fresh.territories));
+                if(fresh.botOwners)setBotOwners(fresh.botOwners);
+              }
+            }
+          }
+        }
+        if(!cancelled)setLoading(false);
+      }catch(e){console.error('Init error:',e);if(!cancelled)setLoading(false);}
+    }
+    init();
+    return()=>{cancelled=true;};
+  },[myId,isGuest]);
+
+  useEffect(()=>{
+    if(!loading&&screen==="init"){
+      if(catchUpData)setScreen("catchUp");
+      else if(hasStarted)setScreen("kingdom");
+      else setScreen("pickHome");
+    }
+  },[loading,screen,catchUpData,hasStarted]);
+
+  /* ═══ SAVE SYSTEM ═══ */
+  const saveAll=useCallback(()=>{
+    const cur=terrRef.current;
+    if(!myId)return;
+    Object.entries(cur).forEach(([id,t])=>{
+      if(t.owner===myId){
+        sb.from('territories').update({garrison:t.garrison,owner_type:'player',owner_id:myId}).eq('comuna_id',id);
+      }
+    });
+  },[myId]);
+
+  useEffect(()=>{
+    if(loading||!myId)return;
+    const iv=setInterval(saveAll,SAVE_INTERVAL);
+    return()=>clearInterval(iv);
+  },[loading,myId,saveAll]);
+
+  useEffect(()=>{
+    if(!myId)return;
+    const save=()=>{
+      Object.entries(terrRef.current).forEach(([id,t])=>{
+        if(t.owner===myId){
+          fetch(`${SUPABASE_URL}/rest/v1/territories?comuna_id=eq.${id}`,{method:'PATCH',
+            headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,'Authorization':`Bearer ${SUPABASE_ANON_KEY}`,'Prefer':'return=minimal'},
+            body:JSON.stringify({garrison:t.garrison,owner_type:'player',owner_id:myId}),keepalive:true}).catch(()=>{});
+        }
+      });
+    };
+    const onVis=()=>{if(document.visibilityState==='hidden')save();};
+    window.addEventListener('beforeunload',save);
+    window.addEventListener('pagehide',save);
+    document.addEventListener('visibilitychange',onVis);
+    return()=>{window.removeEventListener('beforeunload',save);window.removeEventListener('pagehide',save);document.removeEventListener('visibilitychange',onVis);};
+  },[myId]);
+
+  /* ═══ PASSIVE INCOME ═══ */
+  const prodRateRef=useRef(prodRate);
+  useEffect(()=>{prodRateRef.current=prodRate;},[prodRate]);
+  useEffect(()=>{
+    if(loading)return;
+    const iv=setInterval(()=>{
+      const pr=prodRateRef.current;
+      setTerritories(prev=>{
+        let changed=false;const next={...prev};
+        Object.entries(next).forEach(([id,t])=>{
+          if(t.owner===myId){next[id]={...t,garrison:t.garrison+pr};changed=true;}
+        });
+        return changed?next:prev;
+      });
+    },PASSIVE_MS);
+    return()=>clearInterval(iv);
+  },[loading,myId]);
+
+  /* ═══ AUTO BOT TURN ═══ */
+  useEffect(()=>{
+    if(loading)return;
+    const iv=setInterval(async()=>{
+      if(battleState?.phase==='narrating')return;
+      const cur=terrRef.current;
+      const curBO=botOwnersRef.current;
+      const r=simulateBotTurn(cur,curBO);
+      setTerritories(r.terr);
+      setBotOwners(r.botOwners);
+      await syncWorldState(r.terr);
+      await saveBotOwners(r.botOwners);
+      await sb.from('game_meta').update({value:new Date().toISOString()}).eq('key','last_bot_turn');
+      const playerEvts=r.events.filter(e=>e.startsWith("⚠️")||e.startsWith("🛡️"));
+      const msg=playerEvts.length>0?playerEvts[0]:`⏩ Bots se movieron (${r.events.length} eventos)`;
+      showToast(msg,4000);
+      setBattleLog(l=>[{text:msg,type:playerEvts.some(e=>e.startsWith("⚠️"))?"lose":"info"},...l.slice(0,29)]);
+    },AUTO_TURN_MS);
+    return()=>clearInterval(iv);
+  },[loading,battleState]);
+
+  /* ═══ VIDEO COOLDOWN TICKER ═══ */
+  useEffect(()=>{
+    if(videoReady)return;
+    const iv=setInterval(()=>setVideoTick(t=>t+1),1000);
+    return()=>clearInterval(iv);
+  },[videoReady]);
+
+  /* ═══ WATCH VIDEO ═══ */
+  const watchVideo=useCallback(async(comunaId)=>{
+    if(!videoReady)return;
+    const now=Date.now();
+    setLastVideoTime(now);
+    try{localStorage.setItem("wm2_vid",now.toString());}catch{}
+    const{data}=await sb.from('territories').select('garrison').eq('comuna_id',comunaId).single();
+    const newG=(data?.garrison||0)+VIDEO_BONUS;
+    await sb.from('territories').update({garrison:newG}).eq('comuna_id',comunaId);
+    setTerritories(prev=>({...prev,[comunaId]:{...prev[comunaId],garrison:newG}}));
+    const cn=getCom(comunaId)?.name||"";
+    showToast(`📺 +${VIDEO_BONUS} soldados en ${cn}`);
+    setBattleLog(l=>[{text:`📺 ${cn}: +${VIDEO_BONUS} soldados`,type:"train"},...l.slice(0,29)]);
+    setScreen("kingdom");
+  },[videoReady]);
+
+  /* ═══ UPGRADE PRODUCTION ═══ */
+  const UPGRADE_COSTS=[0,100,200,300,400];
+  const nextUpgradeCost=prodRate<5?UPGRADE_COSTS[prodRate]:null;
+  const canUpgrade=nextUpgradeCost!==null&&totalSoldiers>=nextUpgradeCost;
+  const[upgrading,setUpgrading]=useState(false);
+  const upgradeProduction=useCallback(async()=>{
+    if(!canUpgrade||upgrading||!myId)return;
+    setUpgrading(true);
+    try{
+      const cost=nextUpgradeCost;
+      const newRate=prodRate+1;
+      await sb.from('players').update({prod_rate:newRate}).eq('id',myId);
+      let remaining=cost;
+      const cur=terrRef.current;
+      for(const[id,t]of Object.entries(cur)){
+        if(t.owner!==myId||remaining<=0)continue;
+        const take=Math.min(remaining,t.garrison-1);
+        if(take>0){
+          remaining-=take;
+          await sb.from('territories').update({garrison:t.garrison-take}).eq('comuna_id',id);
+        }
+      }
+      const world=await fetchWorld();
+      setTerritories(buildState(world.territories));
+      setProdRate(newRate);
+      showToast(`⬆️ Producción: ${newRate} cada 10 min`);
+      setBattleLog(l=>[{text:`⬆️ Producción mejorada a ${newRate}/10min (−${cost})`,type:"train"},...l.slice(0,29)]);
+    }catch(e){console.error(e);}
+    setUpgrading(false);
+  },[canUpgrade,upgrading,myId,prodRate,nextUpgradeCost]);
+
+  /* ═══ MANUAL BOT TURN ═══ */
+  const doManualBotTurn=useCallback(async()=>{
+    const curBO=botOwnersRef.current;
+    const r=simulateBotTurn(terrRef.current,curBO);
+    setTerritories(r.terr);
+    setBotOwners(r.botOwners);
+    await syncWorldState(r.terr);
+    await saveBotOwners(r.botOwners);
+    await sb.from('game_meta').update({value:new Date().toISOString()}).eq('key','last_bot_turn');
+    showToast(`⏩ Turno bot: ${r.events.length} eventos`);
+    setBattleLog(l=>[...r.events.map(e=>({text:e,type:e.startsWith("⚠️")?"lose":"info"})),...l].slice(0,30));
+  },[]);
+
+  /* ═══ MOVE SOLDIERS ═══ */
+  const moveSoldiers=useCallback(async(fromId,toId,amount)=>{
+    if(!myId||amount<=0)return;
+    const from=terrRef.current[fromId];
+    const to=terrRef.current[toId];
+    if(!from||!to||from.owner!==myId||to.owner!==myId)return;
+    if(amount>=from.garrison)amount=from.garrison-1;
+    if(amount<=0)return;
+    const newFrom=from.garrison-amount;
+    const newTo=to.garrison+amount;
+    await sb.from('territories').update({garrison:newFrom}).eq('comuna_id',fromId);
+    await sb.from('territories').update({garrison:newTo}).eq('comuna_id',toId);
+    setTerritories(prev=>({...prev,
+      [fromId]:{...prev[fromId],garrison:newFrom},
+      [toId]:{...prev[toId],garrison:newTo}
+    }));
+    setMoveState(null);
+    showToast(`🚶 ${amount} soldados → ${getCom(toId)?.name}`);
+    setBattleLog(l=>[{text:`🚶 Moviste ${amount} de ${getCom(fromId)?.name} a ${getCom(toId)?.name}`,type:"info"},...l.slice(0,29)]);
+  },[myId]);
+
+  /* ═══ PICK HOME ═══ */
+  const pickHome=useCallback(async(comunaId)=>{
+    if(!myId)return;
+    await sb.from('territories').update({owner_type:'player',owner_id:myId,garrison:STARTING_SOLDIERS}).eq('comuna_id',comunaId);
+    setTerritories(prev=>({...prev,[comunaId]:{owner:myId,garrison:STARTING_SOLDIERS}}));
+    // Remove from bot owners
+    const newBO={...botOwnersRef.current};
+    delete newBO[comunaId];
+    setBotOwners(newBO);
+    await saveBotOwners(newBO);
+    showToast(`🏰 ¡${getCom(comunaId)?.name} es tu hogar!`);
+    setScreen("kingdom");
+  },[myId]);
+
+  /* ═══ ATTACK ═══ */
+  const startAttack=useCallback((fromId,toId)=>{
+    const from=terrRef.current[fromId];
+    const to=terrRef.current[toId];
+    if(!from||!to||from.owner!==myId)return;
+
+    const ratio=from.garrison/(to.garrison||1);
+    const lines=pickNarr(true,ratio);
+    const result=combat(from.garrison,to.garrison);
+
+    setBattleState({phase:'narrating',lines,lineIdx:0,result,fromId,toId});
+    setScreen("battle");
+
+    battleTimers.current.forEach(clearTimeout);
+    battleTimers.current=[];
+    for(let i=1;i<lines.length;i++){
+      battleTimers.current.push(setTimeout(()=>setBattleState(prev=>({...prev,lineIdx:i})),i*1800));
+    }
+    battleTimers.current.push(setTimeout(async()=>{
+      const r=result;
+      const conquered=r.conquered;
+      const cName=getCom(toId)?.name||"";
+
+      if(r.attackerWins){
+        if(conquered){
+          const moveCount=Math.ceil(r.newAttacker*0.25);
+          const stayCount=r.newAttacker-moveCount;
+          await sb.from('territories').update({owner_type:'player',owner_id:myId,garrison:moveCount}).eq('comuna_id',toId);
+          await sb.from('territories').update({garrison:stayCount}).eq('comuna_id',fromId);
+          if(myId)await sb.from('players').update({wins:wins+1}).eq('id',myId);
+          setTerritories(prev=>({...prev,
+            [toId]:{owner:myId,garrison:moveCount},
+            [fromId]:{...prev[fromId],garrison:stayCount}
+          }));
+          // Remove conquered comuna from bot owners
+          const newBO={...botOwnersRef.current};
+          const conqueredBotId=newBO[toId];
+          delete newBO[toId];
+          setBotOwners(newBO);
+          await saveBotOwners(newBO);
+          setWins(w=>w+1);
+          const vassalName=conqueredBotId?getBotName(conqueredBotId):'';
+          const vassalMsg=vassalName?` — ${vassalName} ahora sirve a tu reino`:'';
+          setBattleLog(l=>[{text:`🏆 ¡Conquistaste ${cName}!${vassalMsg} (${moveCount} → nueva, ${stayCount} quedan)`,type:"win"},...l.slice(0,29)]);
+        }else{
+          await sb.from('territories').update({garrison:r.newAttacker}).eq('comuna_id',fromId);
+          await sb.from('territories').update({garrison:r.newDefender}).eq('comuna_id',toId);
+          if(myId)await sb.from('players').update({wins:wins+1}).eq('id',myId);
+          setTerritories(prev=>({...prev,
+            [fromId]:{...prev[fromId],garrison:r.newAttacker},
+            [toId]:{...prev[toId],garrison:r.newDefender}
+          }));
+          setWins(w=>w+1);
+          setBattleLog(l=>[{text:`⚔️ Victoria en ${cName}! Tú: -${r.attackerLoss}, Ellos: -${r.defenderLoss}`,type:"win"},...l.slice(0,29)]);
+        }
+      }else{
+        await sb.from('territories').update({garrison:r.newAttacker}).eq('comuna_id',fromId);
+        await sb.from('territories').update({garrison:r.newDefender}).eq('comuna_id',toId);
+        if(myId)await sb.from('players').update({losses:losses+1}).eq('id',myId);
+        setTerritories(prev=>({...prev,
+          [fromId]:{...prev[fromId],garrison:r.newAttacker},
+          [toId]:{...prev[toId],garrison:r.newDefender}
+        }));
+        setLosses(l=>l+1);
+        setBattleLog(l=>[{text:`💀 Derrota en ${cName}. Tú: -${r.attackerLoss}`,type:"lose"},...l.slice(0,29)]);
+      }
+      setBattleState(prev=>({...prev,phase:'result',lines:pickNarr(r.attackerWins,from.garrison/(to.garrison||1))}));
+    },lines.length*1800+500));
+  },[myId,wins,losses]);
+
+  useEffect(()=>()=>{battleTimers.current.forEach(clearTimeout);},[]);
+
+  /* ═══ HELPER: get player info ═══ */
+  const getPlayerName=(oid)=>allPlayers.find(p=>p.id===oid)?.name||'Bot';
+  const getPlayerColor=(oid)=>{
+    if(!oid||oid==='npc')return NPC_COLOR;
+    if(oid===myId)return C.gold;
+    const idx=allPlayers.findIndex(p=>p.id===oid);
+    return PLAYER_COLORS[idx%PLAYER_COLORS.length];
+  };
+
+  // Get display info for a comuna's bot owner
+  const getComunaBotInfo=(comunaId)=>{
+    const botId=botOwners[comunaId];
+    if(!botId)return null;
+    const ownerName=getBotName(botId);
+    const originalBot=getBotName(comunaId);
+    const homeComuna=getBotHomeComunaId(botId);
+    const isHome=homeComuna===comunaId;
+    const pInfo=getPersonalityInfo(botId);
+    const empireSize=botEmpireStats[botId]?.comunas.length||1;
+    const totalGarrison=botEmpireStats[botId]?.totalGarrison||0;
+    return{botId,ownerName,originalBot,isHome,pInfo,empireSize,totalGarrison};
+  };
+
+  /* ═══════════════════════════════════════════════════
+     ZONE 10: SCREENS / UI
+     ═══════════════════════════════════════════════════ */
+  const shell={minHeight:"100vh",width:"100%",background:`radial-gradient(ellipse at 30% 0%,#1a160f 0%,${C.bg} 70%)`,fontFamily:"'Crimson Text',serif",color:C.txt,paddingTop:"env(safe-area-inset-top,0px)",paddingBottom:"env(safe-area-inset-bottom,0px)"};
+
+  if(loading||screen==="init")return <LoadingScreen msg="Conectando al mundo..."/>;
+
+  /* CATCH UP */
+  if(screen==="catchUp"&&catchUpData){
+    return(
+      <div style={{...shell,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:20}}>
+        <div style={{fontSize:48,marginBottom:12}}>⏩</div>
+        <h2 style={{fontFamily:"'Cinzel',serif",color:C.gold,fontSize:20,marginBottom:8}}>Mientras no estabas...</h2>
+        <p style={{color:C.dim,fontSize:14,marginBottom:16}}>Se simularon {catchUpData.turns} turnos</p>
+        <div style={{maxHeight:200,overflow:'auto',width:'100%',maxWidth:400,marginBottom:20}}>
+          {catchUpData.events.slice(0,10).map((e,i)=><div key={i} style={{padding:'6px 0',borderBottom:'1px solid rgba(255,255,255,0.05)',fontSize:13,color:e.startsWith("⚠️")?C.lose:C.dim}}>{e}</div>)}
+        </div>
+        <button onClick={()=>{setCatchUpData(null);setScreen(hasStarted?"kingdom":"pickHome");}} style={{background:`linear-gradient(135deg,${C.gold},#a07828)`,borderRadius:14,padding:'14px 40px',color:'#000',fontFamily:"'Cinzel',serif",fontWeight:800,fontSize:15}}>
+          Continuar
+        </button>
+      </div>
+    );
+  }
+
+  /* PICK HOME */
+  if(screen==="pickHome"){
+    const npcComunas=Object.entries(territories).filter(([,t])=>t.owner==='npc');
+    return(
+      <div style={{...shell,padding:20}}>
+        <div style={{textAlign:'center',marginBottom:16}}>
+          <div style={{fontSize:36}}>🏰</div>
+          <h2 style={{fontFamily:"'Cinzel',serif",color:C.gold,fontSize:20}}>Elige tu comuna</h2>
+          <p style={{color:C.dim,fontSize:13}}>Toca una comuna para establecer tu base (reemplazarás al bot)</p>
+        </div>
+        <HexMap territories={territories} myId={myId} allPlayers={allPlayers} selected={selectedComuna} onSelect={id=>{
+          if(territories[id]?.owner==='npc')setSelectedComuna(id);
+        }} botOwners={botOwners}/>
+        {selectedComuna&&territories[selectedComuna]?.owner==='npc'&&(()=>{
+          const info=getComunaBotInfo(selectedComuna);
+          return(
+            <div className="fade-in" style={{textAlign:'center',marginTop:12}}>
+              <p style={{color:C.gold,fontFamily:"'Cinzel',serif",fontSize:16,marginBottom:4}}>
+                {getCom(selectedComuna)?.name}
+              </p>
+              {info&&(
+                <p style={{color:C.dim,fontSize:12,marginBottom:8}}>
+                  🤖 Controlada por {info.ownerName} {info.pInfo.icon}
+                  {!info.isHome&&` (originalmente ${info.originalBot})`}
+                  {info.empireSize>1&&` — Imperio: ${info.empireSize} comunas`}
+                </p>
+              )}
+              <button onClick={()=>pickHome(selectedComuna)} style={{background:`linear-gradient(135deg,${C.gold},#a07828)`,borderRadius:12,padding:'12px 32px',color:'#000',fontFamily:"'Cinzel',serif",fontWeight:800,fontSize:14}}>
+                🏰 Establecer base aquí
+              </button>
+            </div>
+          );
+        })()}
+      </div>
+    );
+  }
+
+  /* KINGDOM (main dashboard) */
+  if(screen==="kingdom"){
+    // Top 5 bot empires
+    const topEmpires=Object.entries(botEmpireStats)
+      .sort((a,b)=>b[1].comunas.length-a[1].comunas.length)
+      .slice(0,5);
+
+    return(
+      <div style={{...shell,padding:'16px 16px 80px'}}>
+        {toast&&<div style={{position:'fixed',top:12,left:'50%',transform:'translateX(-50%)',background:'rgba(0,0,0,0.9)',border:`1px solid ${C.gold}33`,borderRadius:12,padding:'10px 20px',color:C.gold,fontFamily:"'Cinzel',serif",fontSize:12,zIndex:100,animation:'fadeIn .3s'}}>{toast}</div>}
+
+        <div style={{textAlign:'center',marginBottom:16}}>
+          <div style={{fontSize:12,color:C.dim,letterSpacing:2,fontFamily:"'Cinzel',serif"}}>REINO DE</div>
+          <div style={{fontSize:20,fontFamily:"'Cinzel',serif",fontWeight:900,color:C.gold}}>{user.name}</div>
+          <div style={{fontSize:13,color:C.dim}}>{rank.icon} {rank.name}</div>
+        </div>
+
+        <div style={{display:'flex',justifyContent:'center',gap:12,marginBottom:16,flexWrap:'wrap'}}>
+          {[
+            {label:'Soldados',value:totalSoldiers,icon:'⚔️'},
+            {label:'Comunas',value:myTerrs.length,icon:'🏰'},
+            {label:'+/10min',value:myTerrs.length*prodRate,icon:'💰'},
+            {label:'V/D',value:`${wins}/${losses}`,icon:'📊'}
+          ].map(s=>(
+            <div key={s.label} style={{background:C.card,borderRadius:12,padding:'10px 14px',textAlign:'center',minWidth:70,border:'1px solid rgba(255,255,255,0.05)'}}>
+              <div style={{fontSize:18}}>{s.icon}</div>
+              <div style={{fontSize:16,fontWeight:700,color:C.gold}}>{s.value}</div>
+              <div style={{fontSize:9,color:C.dim,fontFamily:"'Cinzel',serif"}}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+          <button onClick={()=>setScreen("map")} style={{background:'linear-gradient(135deg,#3b82f6,#1d4ed8)',borderRadius:12,padding:'14px',color:'#fff',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13}}>
+            🗺️ Mapa
+          </button>
+          <button onClick={()=>{if(videoReady&&myTerrs.length>0){if(myTerrs.length===1)watchVideo(myTerrs[0][0]);else setScreen("pickVideo");}}} disabled={!videoReady} style={{background:videoReady?'linear-gradient(135deg,#8b5cf6,#6d28d9)':'rgba(255,255,255,0.05)',borderRadius:12,padding:'14px',color:videoReady?'#fff':'rgba(255,255,255,0.3)',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13}}>
+            {videoReady?`📺 Video (+${VIDEO_BONUS})`:`📺 ${Math.floor(videoWaitSec/60)}:${(videoWaitSec%60).toString().padStart(2,'0')}`}
+          </button>
+          <button onClick={doManualBotTurn} style={{background:'linear-gradient(135deg,#f59e0b,#d97706)',borderRadius:12,padding:'14px',color:'#000',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13}}>
+            ⏩ Turno Bot
+          </button>
+          <button onClick={upgradeProduction} disabled={!canUpgrade||upgrading} style={{background:canUpgrade&&!upgrading?'linear-gradient(135deg,#22c55e,#16a34a)':'rgba(255,255,255,0.05)',borderRadius:12,padding:'14px',color:canUpgrade&&!upgrading?'#fff':'rgba(255,255,255,0.3)',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13}}>
+            {upgrading?'⏳...':prodRate>=5?`👑 Max ${prodRate}/10m`:`⬆️ ${prodRate}→${prodRate+1}/10m (${nextUpgradeCost})`}
+          </button>
+        </div>
+
+        {/* My comunas */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.dim,fontFamily:"'Cinzel',serif",letterSpacing:2,marginBottom:6}}>MIS COMUNAS</div>
+          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+            {myTerrs.map(([id,t])=>(
+              <div key={id} style={{background:C.card,borderRadius:8,padding:'6px 10px',border:`1px solid ${C.gold}22`,fontSize:12}}>
+                <span style={{color:C.gold,fontWeight:700}}>{getCom(id)?.name}</span>
+                <span style={{color:C.dim,marginLeft:6}}>⚔{t.garrison}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Top Bot Empires */}
+        {topEmpires.length>0&&(
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,color:C.dim,fontFamily:"'Cinzel',serif",letterSpacing:2,marginBottom:6}}>IMPERIOS BOT</div>
+            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+              {topEmpires.map(([botId,stats])=>(
+                <div key={botId} style={{background:C.card,borderRadius:8,padding:'6px 10px',border:`1px solid ${getBotColor(botId)}33`,fontSize:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div>
+                    <span style={{color:getBotColor(botId),fontWeight:700}}>{stats.personality.icon} {stats.name}</span>
+                    <span style={{color:C.dim,marginLeft:6,fontSize:10}}>{stats.personality.name}</span>
+                  </div>
+                  <div style={{color:C.dim,fontSize:11}}>
+                    🏰{stats.comunas.length} ⚔{stats.totalGarrison}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Battle log */}
+        <div style={{fontSize:11,color:C.dim,fontFamily:"'Cinzel',serif",letterSpacing:2,marginBottom:6}}>HISTORIAL</div>
+        <div style={{maxHeight:200,overflow:'auto'}}>
+          {battleLog.map((e,i)=>(
+            <div key={i} style={{padding:'5px 0',borderBottom:'1px solid rgba(255,255,255,0.03)',fontSize:12,color:e.type==='win'?C.win:e.type==='lose'?C.lose:C.dim}}>
+              {e.text}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  /* PICK VIDEO COMUNA */
+  if(screen==="pickVideo"){
+    return(
+      <div style={{...shell,padding:20}}>
+        <h2 style={{fontFamily:"'Cinzel',serif",color:C.gold,fontSize:18,textAlign:'center',marginBottom:16}}>📺 ¿Dónde sumas soldados?</h2>
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {myTerrs.map(([id,t])=>(
+            <button key={id} onClick={()=>watchVideo(id)} style={{background:C.card,border:`1px solid ${C.gold}33`,borderRadius:12,padding:'14px',color:C.gold,fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:14,textAlign:'left'}}>
+              {getCom(id)?.name} — ⚔{t.garrison} (+{VIDEO_BONUS})
+            </button>
+          ))}
+        </div>
+        <button onClick={()=>setScreen("kingdom")} style={{marginTop:16,background:'transparent',border:`1px solid ${C.dim}`,borderRadius:12,padding:'10px 24px',color:C.dim,fontFamily:"'Cinzel',serif",fontSize:13,width:'100%'}}>
+          ← Volver
+        </button>
+      </div>
+    );
+  }
+
+  /* MAP */
+  if(screen==="map"){
+    const sel=selectedComuna?territories[selectedComuna]:null;
+    const selCom=selectedComuna?getCom(selectedComuna):null;
+    const isMine=sel?.owner===myId;
+    const myAdjSet=new Set();
+    myTerrs.forEach(([id])=>getAdj(id).forEach(a=>{if(territories[a]?.owner!==myId)myAdjSet.add(a);}));
+    const isAttackable=selectedComuna&&myAdjSet.has(selectedComuna);
+    const attackFromList=selectedComuna?myTerrs.filter(([id])=>getAdj(id).includes(selectedComuna)):[];
+    const selBotInfo=selectedComuna?getComunaBotInfo(selectedComuna):null;
+
+    return(
+      <div style={{...shell,padding:'12px 8px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,padding:'0 8px'}}>
+          <button onClick={()=>{setScreen("kingdom");setSelectedComuna(null);}} style={{background:'transparent',color:C.gold,fontFamily:"'Cinzel',serif",fontSize:13}}>← Reino</button>
+          <span style={{fontFamily:"'Cinzel',serif",color:C.gold,fontSize:14}}>🗺️ Mapa de Santiago</span>
+          <div style={{width:40}}/>
+        </div>
+
+        <HexMap territories={territories} myId={myId} allPlayers={allPlayers} selected={selectedComuna} onSelect={setSelectedComuna} botOwners={botOwners}/>
+
+        {/* Bottom panel */}
+        {sel&&selCom&&(
+          <div className="fade-in" style={{background:C.card,borderRadius:14,padding:14,margin:'8px 8px 0',border:'1px solid rgba(255,255,255,0.08)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+              <div>
+                <div style={{fontFamily:"'Cinzel',serif",fontWeight:700,color:isMine?C.gold:sel.owner==='npc'&&selBotInfo?getBotColor(selBotInfo.botId):'#fff',fontSize:15}}>{selCom.name}</div>
+                <div style={{fontSize:12,color:C.dim}}>
+                  {sel.owner==='npc'&&selBotInfo?(
+                    <>
+                      🤖 {selBotInfo.ownerName} <span style={{fontSize:10}}>{selBotInfo.pInfo.icon} {selBotInfo.pInfo.name}</span>
+                      {!selBotInfo.isHome&&(
+                        <span style={{display:'block',fontSize:10,color:C.dim,marginTop:2}}>
+                          📜 {selBotInfo.originalBot} sirve a {selBotInfo.ownerName}
+                        </span>
+                      )}
+                      {selBotInfo.empireSize>1&&(
+                        <span style={{display:'block',fontSize:10,color:getBotColor(selBotInfo.botId),marginTop:2}}>
+                          👑 Imperio: {selBotInfo.empireSize} comunas · ⚔{selBotInfo.totalGarrison} total
+                        </span>
+                      )}
+                    </>
+                  ):isMine?'🏰 Tu comuna':`👤 ${getPlayerName(sel.owner)}`}
+                </div>
+              </div>
+              <div style={{fontSize:22,fontWeight:700,color:isMine?C.gold:sel.owner==='npc'&&selBotInfo?getBotColor(selBotInfo.botId):getPlayerColor(sel.owner)}}>⚔{sel.garrison}</div>
+            </div>
+            {isAttackable&&attackFromList.map(([fId])=>(
+              <button key={fId} onClick={()=>startAttack(fId,selectedComuna)} style={{width:'100%',background:'linear-gradient(135deg,#ef4444,#b91c1c)',borderRadius:10,padding:'12px',color:'#fff',fontFamily:"'Cinzel',serif",fontWeight:800,fontSize:14,marginBottom:4}}>
+                ⚔️ Atacar desde {getCom(fId)?.name} ({territories[fId]?.garrison})
+              </button>
+            ))}
+            {isMine&&(
+              <div>
+                <div style={{fontSize:12,color:C.dim,textAlign:'center',marginBottom:8}}>Tu territorio — producción: +{prodRate}/10min</div>
+                {(()=>{
+                  const adjMine=getAdj(selectedComuna).filter(id=>territories[id]?.owner===myId);
+                  if(adjMine.length===0)return null;
+                  if(!moveState||moveState.fromId!==selectedComuna)return(
+                    <button onClick={()=>setMoveState({fromId:selectedComuna,toId:null,amount:Math.floor(sel.garrison/2)})} style={{width:'100%',background:'linear-gradient(135deg,#3b82f6,#1d4ed8)',borderRadius:10,padding:'10px',color:'#fff',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13}}>
+                      🚶 Mover soldados
+                    </button>
+                  );
+                  return(
+                    <div className="fade-in">
+                      <div style={{fontSize:12,color:C.gold,marginBottom:6,fontFamily:"'Cinzel',serif"}}>Mover a:</div>
+                      {adjMine.map(toId=>(
+                        <button key={toId} onClick={()=>setMoveState(prev=>({...prev,toId}))} style={{width:'100%',background:moveState.toId===toId?`${C.gold}33`:C.card,border:`1px solid ${moveState.toId===toId?C.gold:'rgba(255,255,255,0.1)'}`,borderRadius:8,padding:'8px',color:moveState.toId===toId?C.gold:C.txt,fontFamily:"'Cinzel',serif",fontSize:12,marginBottom:4}}>
+                          {getCom(toId)?.name} (⚔{territories[toId]?.garrison})
+                        </button>
+                      ))}
+                      {moveState.toId&&(
+                        <div style={{marginTop:8}}>
+                          <div style={{display:'flex',alignItems:'center',gap:8,justifyContent:'center',marginBottom:8}}>
+                            <button onClick={()=>setMoveState(prev=>({...prev,amount:Math.max(1,prev.amount-10)}))} style={{background:C.card,borderRadius:8,padding:'6px 12px',color:C.gold,fontSize:14}}>−10</button>
+                            <button onClick={()=>setMoveState(prev=>({...prev,amount:Math.max(1,prev.amount-1)}))} style={{background:C.card,borderRadius:8,padding:'6px 10px',color:C.gold,fontSize:14}}>−</button>
+                            <span style={{color:C.gold,fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:16,minWidth:40,textAlign:'center'}}>{moveState.amount}</span>
+                            <button onClick={()=>setMoveState(prev=>({...prev,amount:Math.min(sel.garrison-1,prev.amount+1)}))} style={{background:C.card,borderRadius:8,padding:'6px 10px',color:C.gold,fontSize:14}}>+</button>
+                            <button onClick={()=>setMoveState(prev=>({...prev,amount:Math.min(sel.garrison-1,prev.amount+10)}))} style={{background:C.card,borderRadius:8,padding:'6px 12px',color:C.gold,fontSize:14}}>+10</button>
+                          </div>
+                          <div style={{display:'flex',gap:6}}>
+                            <button onClick={()=>moveSoldiers(moveState.fromId,moveState.toId,moveState.amount)} style={{flex:1,background:'linear-gradient(135deg,#22c55e,#16a34a)',borderRadius:10,padding:'10px',color:'#fff',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13}}>
+                              ✅ Mover {moveState.amount}
+                            </button>
+                            <button onClick={()=>setMoveState(null)} style={{background:C.card,borderRadius:10,padding:'10px 14px',color:C.dim,fontFamily:"'Cinzel',serif",fontSize:13}}>
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+            {!isMine&&!isAttackable&&(
+              <div style={{fontSize:12,color:C.dim,textAlign:'center'}}>No tienes comunas adyacentes para atacar</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* BATTLE */
+  if(screen==="battle"&&battleState){
+    const bs=battleState;
+    const fromCom=getCom(bs.fromId);
+    const toCom=getCom(bs.toId);
+    const r=bs.result;
+    const defBotInfo=getComunaBotInfo(bs.toId);
+    return(
+      <div style={{...shell,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:20,textAlign:'center'}}>
+        {bs.phase==='narrating'&&(
+          <>
+            <div style={{fontSize:14,color:C.dim,fontFamily:"'Cinzel',serif",marginBottom:20}}>
+              {fromCom?.name} → {toCom?.name}
+              {defBotInfo&&<span style={{display:'block',fontSize:11,marginTop:4}}>🤖 Defendido por {defBotInfo.ownerName} {defBotInfo.pInfo.icon}</span>}
+            </div>
+            <div style={{minHeight:120,display:'flex',flexDirection:'column',gap:12,justifyContent:'center'}}>
+              {bs.lines.slice(0,bs.lineIdx+1).map((line,i)=>(
+                <div key={i} className="fade-in" style={{fontSize:16,color:i===bs.lineIdx?C.gold:C.dim,fontFamily:"'Crimson Text',serif"}}>{line}</div>
+              ))}
+            </div>
+            <div style={{marginTop:20,animation:'pulse 1.5s infinite',color:C.dim,fontSize:12}}>⚔️ Batalla en progreso...</div>
+          </>
+        )}
+        {bs.phase==='result'&&(
+          <>
+            <div style={{fontSize:48,marginBottom:12}}>{r.attackerWins?(r.conquered?'🏆':'⚔️'):'💀'}</div>
+            <h2 style={{fontFamily:"'Cinzel',serif",color:r.attackerWins?C.win:C.lose,fontSize:22,marginBottom:8}}>
+              {r.attackerWins?(r.conquered?'¡CONQUISTADO!':'¡VICTORIA!'):'DERROTA'}
+            </h2>
+            {r.conquered&&defBotInfo&&(
+              <div style={{fontSize:12,color:C.dim,marginBottom:8,fontFamily:"'Crimson Text',serif"}}>
+                📜 {defBotInfo.originalBot} ahora sirve a tu reino
+              </div>
+            )}
+            <div style={{background:C.card,borderRadius:14,padding:16,width:'100%',maxWidth:320,marginBottom:16}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}>
+                <span style={{color:C.gold}}>Tú</span><span style={{color:C.gold}}>-{r.attackerLoss} → {r.newAttacker}</span>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between'}}>
+                <span style={{color:defBotInfo?getBotColor(defBotInfo.botId):NPC_COLOR}}>
+                  {defBotInfo?defBotInfo.ownerName:'Enemigo'}
+                </span>
+                <span style={{color:defBotInfo?getBotColor(defBotInfo.botId):NPC_COLOR}}>-{r.defenderLoss} → {r.newDefender}</span>
+              </div>
+              {r.conquered&&(
+                <div style={{marginTop:10,padding:8,background:`${C.win}22`,borderRadius:8,color:C.win,fontSize:13}}>
+                  25% de tus soldados se mudan a la nueva comuna
+                </div>
+              )}
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              {r.attackerWins&&!r.conquered&&territories[bs.toId]?.garrison>0&&(
+                <button onClick={()=>{setBattleState(null);setSelectedComuna(bs.toId);startAttack(bs.fromId,bs.toId);}} style={{background:'linear-gradient(135deg,#ef4444,#b91c1c)',borderRadius:12,padding:'12px 24px',color:'#fff',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13}}>
+                  ⚔️ Atacar otra vez
+                </button>
+              )}
+              <button onClick={()=>{setBattleState(null);setScreen("map");}} style={{background:`linear-gradient(135deg,${C.gold},#a07828)`,borderRadius:12,padding:'12px 24px',color:'#000',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13}}>
+                🗺️ Volver al mapa
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return <LoadingScreen msg="Cargando..."/>;
+}
+
+ReactDOM.render(<AuthApp/>,document.getElementById('root'));
+</script>
+</body>
+</html>
