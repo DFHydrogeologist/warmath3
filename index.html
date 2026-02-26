@@ -842,7 +842,7 @@ function App({user,dbPlayer,onLogout}){
 
   /* ═══ WATCH VIDEO ═══ */
   const watchVideo=useCallback(async(comunaId)=>{
-    if(!videoReady)return;
+    if(Date.now()-lastVideoTime<VIDEO_COOLDOWN_MS)return;
     const now=Date.now();setLastVideoTime(now);
     try{localStorage.setItem("wm2_vid",now.toString());}catch{}
     const{data}=await sb.from('territories').select('soldiers').eq('comuna_id',comunaId).single();
@@ -852,7 +852,7 @@ function App({user,dbPlayer,onLogout}){
     showToast(`📺 +${VIDEO_BONUS} soldados en ${getCom(comunaId)?.name}`);
     setBattleLog(l=>[{text:`📺 ${getCom(comunaId)?.name}: +${VIDEO_BONUS} soldados`,type:"train"},...l.slice(0,29)]);
     setScreen("kingdom");
-  },[videoReady,territories]);
+  },[territories]);
 
   /* ═══ CREATE UNIT ═══ */
   const createUnit=useCallback(async(comunaId,unitType)=>{
