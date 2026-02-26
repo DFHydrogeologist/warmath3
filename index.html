@@ -1185,7 +1185,8 @@ function App({user,dbPlayer,onLogout}){
             ))}
             {isMine&&(
               <div>
-                <div style={{fontSize:12,color:C.dim,textAlign:'center',marginBottom:8}}>Tu territorio — producción: +{prodRate}/10min</div>
+                <div style={{fontSize:12,color:C.dim,textAlign:'center',marginBottom:4}}>Tu territorio — producción: +{prodRate}/10min</div>
+                <div style={{fontSize:11,color:'#8b7355',textAlign:'center',marginBottom:8,fontFamily:"'Crimson Text',serif",fontStyle:'italic'}}>📜 {getBotName(selectedComuna)} custodia esta tierra para tu reino</div>
                 {(()=>{
                   const adjMine=getAdj(selectedComuna).filter(id=>territories[id]?.owner===myId);
                   if(adjMine.length===0)return null;
