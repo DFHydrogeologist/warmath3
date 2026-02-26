@@ -310,6 +310,22 @@ function simulateBotTurn(terr,botOwners){
       if(!empires[botId])empires[botId]=[];
       empires[botId].push(id);
     }
+   });
+
+  // Reinforcement phase: empires send troops to weak comunas
+  Object.entries(empires).forEach(([botId,comunas])=>{
+    if(comunas.length<2)return;
+    comunas.forEach(weakId=>{
+      if(next[weakId].garrison>=20)return;
+      const donors=getAdj(weakId).filter(id=>comunas.includes(id)&&next[id].garrison>40);
+      if(donors.length===0)return;
+      const donor=donors.sort((a,b)=>next[b].garrison-next[a].garrison)[0];
+      const send=Math.floor(next[donor].garrison*0.3);
+      if(send<5)return;
+      next[donor].garrison-=send;
+      next[weakId].garrison+=send;
+      events.push(`🚶 ${getBotName(botId)}: ${send} refuerzos → ${getCom(weakId)?.name}`);
+    });
   });
 
   // Pick 2-5 bot empires to act
