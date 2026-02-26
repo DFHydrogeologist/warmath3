@@ -945,9 +945,10 @@ function App({user,dbPlayer,onLogout}){
 
     const isBombard=attackType==='bombardment';
     const ratio=totalPower(from)/(totalPower(to)||1);
-    const lines=pickNarr(result.attackerWins,ratio,isBombard);
     const result=unitCombat(from,to,attackType);
     if(!result){showToast('No tienes unidades para este ataque');return;}
+    const lines=pickNarr(result.attackerWins,ratio,isBombard);
+    
 
     setBattleState({phase:'narrating',lines,lineIdx:0,result,fromId,toId,attackType});
     setScreen("battle");
