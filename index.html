@@ -860,7 +860,7 @@ function App({user,dbPlayer,onLogout}){
     myTerrs.forEach(([id])=>getAdj(id).forEach(a=>{if(territories[a]?.owner!==myId)myAdjSet.add(a);}));
     const isAttackable=selectedComuna&&myAdjSet.has(selectedComuna);
     // Find which of my comunas is adjacent to the selected
-    const attackFrom=selectedComuna?myTerrs.find(([id])=>getAdj(id).includes(selectedComuna))?.[0]:null;
+    const attackFromList=selectedComuna?myTerrs.filter(([id])=>getAdj(id).includes(selectedComuna)):[];
 
     return(
       <div style={{...shell,padding:'12px 8px'}}>
@@ -884,11 +884,11 @@ function App({user,dbPlayer,onLogout}){
               </div>
               <div style={{fontSize:22,fontWeight:700,color:isMine?C.gold:getPlayerColor(sel.owner)}}>⚔{sel.garrison}</div>
             </div>
-            {isAttackable&&attackFrom&&(
-              <button onClick={()=>startAttack(attackFrom,selectedComuna)} style={{width:'100%',background:'linear-gradient(135deg,#ef4444,#b91c1c)',borderRadius:10,padding:'12px',color:'#fff',fontFamily:"'Cinzel',serif",fontWeight:800,fontSize:14}}>
-                ⚔️ Atacar desde {getCom(attackFrom)?.name} ({territories[attackFrom]?.garrison})
+            {isAttackable&&attackFromList.map(([fId])=>(
+              <button key={fId} onClick={()=>startAttack(fId,selectedComuna)} style={{width:'100%',background:'linear-gradient(135deg,#ef4444,#b91c1c)',borderRadius:10,padding:'12px',color:'#fff',fontFamily:"'Cinzel',serif",fontWeight:800,fontSize:14,marginBottom:4}}>
+                ⚔️ Atacar desde {getCom(fId)?.name} ({territories[fId]?.garrison})
               </button>
-            )}
+            ))}
             {isMine&&(
               <div style={{fontSize:12,color:C.dim,textAlign:'center'}}>Tu territorio — producción: +{prodRate}/10min</div>
             )}
