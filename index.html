@@ -99,7 +99,8 @@ const BOT_NAMES={
   estCentral:'Comandante Alameda',qtaNormal:'General Carrascal',recoleta:'Coronel Zapata',
   independencia:'Duque Santos',conchali:'Capitán Zapadores',huechuraba:'Barón del Norte',
   renca:'Teniente Cerro',pudahuel:'Sargento Estrella',loPrado:'Comandante Prado',
-  cerroNavia:'Mariscal Navia',sanBernardo:"General O'Higgins",laCisterna:'Coronel Cisterna'
+  cerroNavia:'Mariscal Navia',sanBernardo:"General O'Higgins",laCisterna:'Coronel Cisterna',
+loBarnechea:'Barón Andino',quilicura:'Capitán del Norte',elBosque:'Sargento Forestal',laPintana:'Teniente del Sur'
 };
 
 function simpleHash(str){let h=0;for(let i=0;i<str.length;i++)h=((h<<5)-h+str.charCodeAt(i))|0;return Math.abs(h);}
@@ -177,8 +178,11 @@ const COMUNAS=[
   {id:'laFlorida',name:'La Florida',x:440,y:375,r:35,zone:'sur'},
   {id:'sanBernardo',name:'S.Bernardo',x:170,y:450,r:35,zone:'sur'},
   {id:'puenteAlto',name:'Puente Alto',x:450,y:465,r:38,zone:'sur'},
+  {id:'loBarnechea',name:'Lo Barnechea',x:550,y:20,r:28,zone:'oriente'},
+  {id:'quilicura',name:'Quilicura',x:190,y:0,r:26,zone:'norte'},
+  {id:'elBosque',name:'El Bosque',x:220,y:415,r:23,zone:'sur'},
+  {id:'laPintana',name:'La Pintana',x:310,y:470,r:30,zone:'sur'},
 ];
-
 const ADJ_FACTOR=2.1;
 COMUNAS.forEach(c=>{
   c.adj=COMUNAS.filter(o=>o.id!==c.id&&Math.hypot(c.x-o.x,c.y-o.y)<(c.r+o.r)*ADJ_FACTOR).map(o=>o.id);
@@ -267,8 +271,20 @@ function unitCombat(attUnits,defUnits,attackType){
   const aTypes=attackType==='bombardment'?['tanks']:null;
   const dTypes=attackType==='bombardment'?['soldiers','flamethrowers','tanks','towers']:null;
 
-  const aLosses=distributeLosses(attUnits,aLossR,aTypes);
+  let aLosses=distributeLosses(attUnits,aLossR,aTypes);
   const dLosses=distributeLosses(defUnits,dLossR,dTypes);
+
+  // Winner never loses more than loser
+  const aTotalLoss=UNIT_KEYS.reduce((s,k)=>s+(aLosses[k]||0),0);
+  const dTotalLoss=UNIT_KEYS.reduce((s,k)=>s+(dLosses[k]||0),0);
+  if(attackerWins&&aTotalLoss>dTotalLoss&&dTotalLoss>0){
+    const ratio=dTotalLoss/aTotalLoss*0.8;
+    aLosses=distributeLosses(attUnits,aLossR*ratio,aTypes);
+  }else if(!attackerWins&&dTotalLoss>aTotalLoss&&aTotalLoss>0){
+    const ratio=aTotalLoss/dTotalLoss*0.8;
+    const dLossesFixed=distributeLosses(defUnits,dLossR*ratio,dTypes);
+    UNIT_KEYS.forEach(k=>{dLosses[k]=dLossesFixed[k];});
+  }
 
   // Flamethrower special: all attacker flamethrowers die if assault lost
   if(!attackerWins&&attackType==='assault'){
@@ -543,7 +559,7 @@ function HexMap({territories,myId,allPlayers,selected,onSelect,botOwners}){
   Object.entries(botOwners).forEach(([,botId])=>{empireSizes[botId]=(empireSizes[botId]||0)+1;});
 
   return(
-    <svg viewBox="0 0 580 520" style={{width:'100%',maxWidth:600,margin:'0 auto',display:'block'}}>
+    <svg viewBox="-5 -30 610 545" style={{width:'100%',maxWidth:600,margin:'0 auto',display:'block'}}>
       <defs>
         <filter id="glow"><feGaussianBlur stdDeviation="2" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
       </defs>
