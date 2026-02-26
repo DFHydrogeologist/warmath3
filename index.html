@@ -404,6 +404,7 @@ function App({user,dbPlayer,onLogout}){
   const[screen,setScreen]=useState("init");
   const[selectedComuna,setSelectedComuna]=useState(null);
   const[toast,setToast]=useState(null);
+  const[moveState,setMoveState]=useState(null);
   const[lastVideoTime,setLastVideoTime]=useState(()=>{try{const t=localStorage.getItem("wm2_vid");return t?parseInt(t):0;}catch{return 0;}});
   const[videoTick,setVideoTick]=useState(0);
 
@@ -624,6 +625,27 @@ function App({user,dbPlayer,onLogout}){
     showToast(`⏩ Turno bot: ${r.events.length} eventos`);
     setBattleLog(l=>[...r.events.map(e=>({text:e,type:e.startsWith("⚠️")?"lose":"info"})),...l].slice(0,30));
   },[]);
+
+  /* ═══ MOVE SOLDIERS ═══ */
+  const moveSoldiers=useCallback(async(fromId,toId,amount)=>{
+    if(!myId||amount<=0)return;
+    const from=terrRef.current[fromId];
+    const to=terrRef.current[toId];
+    if(!from||!to||from.owner!==myId||to.owner!==myId)return;
+    if(amount>=from.garrison)amount=from.garrison-1;
+    if(amount<=0)return;
+    const newFrom=from.garrison-amount;
+    const newTo=to.garrison+amount;
+    await sb.from('territories').update({garrison:newFrom}).eq('comuna_id',fromId);
+    await sb.from('territories').update({garrison:newTo}).eq('comuna_id',toId);
+    setTerritories(prev=>({...prev,
+      [fromId]:{...prev[fromId],garrison:newFrom},
+      [toId]:{...prev[toId],garrison:newTo}
+    }));
+    setMoveState(null);
+    showToast(`🚶 ${amount} soldados → ${getCom(toId)?.name}`);
+    setBattleLog(l=>[{text:`🚶 Moviste ${amount} de ${getCom(fromId)?.name} a ${getCom(toId)?.name}`,type:"info"},...l.slice(0,29)]);
+  },[myId]);
 
   /* ═══ PICK HOME ═══ */
   const pickHome=useCallback(async(comunaId)=>{
@@ -890,7 +912,47 @@ function App({user,dbPlayer,onLogout}){
               </button>
             ))}
             {isMine&&(
-              <div style={{fontSize:12,color:C.dim,textAlign:'center'}}>Tu territorio — producción: +{prodRate}/10min</div>
+              <div>
+                <div style={{fontSize:12,color:C.dim,textAlign:'center',marginBottom:8}}>Tu territorio — producción: +{prodRate}/10min</div>
+                {(()=>{
+                  const adjMine=getAdj(selectedComuna).filter(id=>territories[id]?.owner===myId);
+                  if(adjMine.length===0)return null;
+                  if(!moveState||moveState.fromId!==selectedComuna)return(
+                    <button onClick={()=>setMoveState({fromId:selectedComuna,toId:null,amount:Math.floor(sel.garrison/2)})} style={{width:'100%',background:'linear-gradient(135deg,#3b82f6,#1d4ed8)',borderRadius:10,padding:'10px',color:'#fff',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13}}>
+                      🚶 Mover soldados
+                    </button>
+                  );
+                  return(
+                    <div className="fade-in">
+                      <div style={{fontSize:12,color:C.gold,marginBottom:6,fontFamily:"'Cinzel',serif"}}>Mover a:</div>
+                      {adjMine.map(toId=>(
+                        <button key={toId} onClick={()=>setMoveState(prev=>({...prev,toId}))} style={{width:'100%',background:moveState.toId===toId?`${C.gold}33`:C.card,border:`1px solid ${moveState.toId===toId?C.gold:'rgba(255,255,255,0.1)'}`,borderRadius:8,padding:'8px',color:moveState.toId===toId?C.gold:C.txt,fontFamily:"'Cinzel',serif",fontSize:12,marginBottom:4}}>
+                          {getCom(toId)?.name} (⚔{territories[toId]?.garrison})
+                        </button>
+                      ))}
+                      {moveState.toId&&(
+                        <div style={{marginTop:8}}>
+                          <div style={{display:'flex',alignItems:'center',gap:8,justifyContent:'center',marginBottom:8}}>
+                            <button onClick={()=>setMoveState(prev=>({...prev,amount:Math.max(1,prev.amount-10)}))} style={{background:C.card,borderRadius:8,padding:'6px 12px',color:C.gold,fontSize:14}}>−10</button>
+                            <button onClick={()=>setMoveState(prev=>({...prev,amount:Math.max(1,prev.amount-1)}))} style={{background:C.card,borderRadius:8,padding:'6px 10px',color:C.gold,fontSize:14}}>−</button>
+                            <span style={{color:C.gold,fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:16,minWidth:40,textAlign:'center'}}>{moveState.amount}</span>
+                            <button onClick={()=>setMoveState(prev=>({...prev,amount:Math.min(sel.garrison-1,prev.amount+1)}))} style={{background:C.card,borderRadius:8,padding:'6px 10px',color:C.gold,fontSize:14}}>+</button>
+                            <button onClick={()=>setMoveState(prev=>({...prev,amount:Math.min(sel.garrison-1,prev.amount+10)}))} style={{background:C.card,borderRadius:8,padding:'6px 12px',color:C.gold,fontSize:14}}>+10</button>
+                          </div>
+                          <div style={{display:'flex',gap:6}}>
+                            <button onClick={()=>moveSoldiers(moveState.fromId,moveState.toId,moveState.amount)} style={{flex:1,background:'linear-gradient(135deg,#22c55e,#16a34a)',borderRadius:10,padding:'10px',color:'#fff',fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:13}}>
+                              ✅ Mover {moveState.amount}
+                            </button>
+                            <button onClick={()=>setMoveState(null)} style={{background:C.card,borderRadius:10,padding:'10px 14px',color:C.dim,fontFamily:"'Cinzel',serif",fontSize:13}}>
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
             )}
             {!isMine&&!isAttackable&&(
               <div style={{fontSize:12,color:C.dim,textAlign:'center'}}>No tienes comunas adyacentes para atacar</div>
